@@ -32,7 +32,7 @@ for (size_t i = 0; i < M; ++i) {
 
 这样不必在开始时预测每个线程的总工作量，但领取任务本身也有开销。如果任务数量很多、每个任务很轻，就需要关注这一开销。
 
-实际源码通过 `schedule(runtime)` 使用运行参数设置的调度方式。查看 `src/main.cpp` 中的调度设置，再回到 `src/spmm_parallel.cpp` 中的循环。
+实际源码通过 `schedule(runtime)` 使用运行参数设置的调度方式。先在 `src/main.cpp` 找到 `schedule` 与 `chunk` 的参数解析，再看 `src/benchmark.cpp` 中将它们传给 `omp_set_schedule` 的位置，最后回到 `src/spmm_parallel.cpp` 中的 `schedule(runtime)` 循环。
 
 ## 4. 按非零数构造行块
 
@@ -61,7 +61,7 @@ Tiled 实现把任务进一步划分为：
 
 ## 6. 动手试一试
 
-先按照[操作步骤](run.md)完成构建并执行默认运行。随后从以下方向选择一个进行比较，命令都在 Lab1 中执行。
+先按照[操作步骤](run.md)完成构建和快速验证，再执行完整测量。随后从以下方向选择一个进行比较，命令都在 Lab1 中执行。
 
 ### 观察分工
 

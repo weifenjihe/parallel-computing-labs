@@ -49,7 +49,9 @@ cd parallel-computing-labs
 cd Lab1
 ```
 
-在该文件夹内，按照它的 README 安装依赖、编译、运行并设置参数。
+在该文件夹内，按照它的 README 安装依赖、编译，并先执行“第一次运行：快速验证”。确认 `VERIFY PASS` 后，再扫描完整性能配置或修改参数。Lab1～Lab4 可用 `--build-dir` 选择构建目录；五个实验都支持 `--verify`。
+
+修改实验实现后，可按 [回归检查说明](tests/README.md) 验证参数错误处理、参考验证和构建目录选择。
 
 ## 文件组织
 

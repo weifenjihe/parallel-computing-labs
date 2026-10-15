@@ -50,4 +50,24 @@
     每组参数使用独立的 `--output` 目录名，保留完整命令和 `environment.json`。直接重定向 CSV 时也使用不同文件名。
 
 ??? question "checksum 相同是不是就说明完全正确？"
-    它只表示输出元素总和相同，不足以证明每个元素正确。阅读实现时要确认输出归属、循环范围和同步方式。需要完整核对输出时，应逐元素比较；Lab5 提供 `--save-output` 保存 C。
+    它只表示输出元素总和相同，不足以证明每个元素正确。阅读实现时要确认输出归属、循环范围和同步方式。完整核对输出时，使用各实验的 `--verify` 逐元素或逐桶比较；Lab5 还提供 `--save-output` 保存 C。
+
+## 参数与验证
+
+??? question "换成 build-llvm 后为什么没有运行新程序？"
+    Lab1～Lab4 的构建和测量必须选择同一个目录。执行 `python3 run.py --build-dir build-llvm ...`，把省略号替换为本实验快速验证页的参数。检查 `environment.json` 中的 `build_directory` 和 `compiler`。
+
+??? question "参数拼错、漏了值，或者分块设成 0？"
+    程序会明确报错并退出。先执行 `--help`，按操作页检查参数范围。稀疏乘法的每行非零数不能超过 K；Lab5 的分块不能超过已构建的 SPM 容量。不要使用被拒绝配置的旧 CSV 作分析。
+
+??? question "请求四线程，程序却只得到两线程？"
+    查看错误提示与 `environment.json` 中的 OpenMP 环境设置。已有 `OMP_THREAD_LIMIT=2` 会限制实际线程数。可以改为 `--threads 2`，或在确认不需要该限制后，在当前终端执行 `unset OMP_THREAD_LIMIT`。重新运行使用新的输出目录。
+
+??? question "如何确认修改后的实现仍正确？"
+    重新构建，执行本实验的快速验证命令并保留 `--verify`。`VERIFY PASS` 表示当前输出通过逐元素或逐桶比较；`VERIFY FAIL` 会显示错误位置与期望值。仅比较 checksum 不够。小输入验证通过后，再做性能测量。
+
+??? question "扫描很久或中途按了 Ctrl+C，还能看哪些结果？"
+    先看进度 `i/total`，完整默认扫描有大量独立配置。`raw.csv` 保存已完成配置，最终汇总与图表在全部完成后生成。中断不是完整实验结果，重新运行不自动续跑，请选择新的输出目录。
+
+??? question "Lab5 报 exceeded --max-cycles？"
+    模型触及单次仿真的周期上限。先检查维度、分块、供数和握手；`stall-percent` 必须小于 100。确认任务规模确实更大后，再提高 `--max-cycles`，例如 `--max-cycles 200000000`。

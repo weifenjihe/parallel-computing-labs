@@ -1,4 +1,5 @@
 #include "benchmark.hpp"
+#include "verification.hpp"
 #include "support.hpp"
 #include <omp.h>
 
@@ -28,6 +29,7 @@ void benchmark(const Config& cfg) {
         else parallel_tiled(a, b, c, blocks, cfg.tile, execution);
         const double elapsed = lab::now() - start;
         const double checksum = std::accumulate(c.values.begin(), c.values.end(), 0.0);
+        if (cfg.verify) verify_output(a, b, c);
         if (trial >= 0) {
             times.push_back(elapsed); checksums.push_back(checksum);
             samples.push_back(std::move(execution));

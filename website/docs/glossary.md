@@ -38,6 +38,7 @@
 | PE | 执行乘加并传递相邻数据的处理单元。 | [架构教程](lab5/architecture.md) |
 | 脉动阵列 | 数据沿相邻 PE 逐拍流动的二维计算阵列。 | [架构教程](lab5/architecture.md) |
 | SPM | 明确安排加载和覆盖的局部工作空间。 | [架构教程](lab5/architecture.md) |
+| bank／存储分区 | SPM 内能分别读写的存储分区，用于同时提供多行或多列数据。 | [架构教程](lab5/architecture.md) |
 | DMA | 在软件 DRAM 与 SPM 之间搬运数据的模块。 | [架构教程](lab5/architecture.md) |
 | 双缓冲 | 计算当前块时，用另一个缓冲区准备下一块。 | [分块教程](lab5/tiling.md) |
 | 数据拍／beat | 一次握手传输的数据单位，本实验为 64 位。 | [供数接口](lab5/architecture.md) |

@@ -4,6 +4,7 @@
 #include "verilated_vcd_c.h"
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 
 namespace gemm {
 Result simulate(const Config& cfg, std::uint32_t timing_seed, bool save_trace) {
@@ -35,7 +36,13 @@ Result simulate(const Config& cfg, std::uint32_t timing_seed, bool save_trace) {
     step(); step(); top->rst_n = 1;
     const auto begin = lab::now();
     top->start = 1; step(); top->start = 0;
-    while (!top->done) step();
+    std::uint64_t working_cycles = 1;
+    while (!top->done) {
+        if (working_cycles >= cfg.max_cycles)
+            throw std::runtime_error("Simulation exceeded --max-cycles=" + std::to_string(cfg.max_cycles)
+                                     + ". Inspect the configuration/handshakes or increase the limit.");
+        step(); ++working_cycles;
+    }
     Result result{top->cycles, top->compute_cycles, top->input_wait_cycles, top->output_cycles,
                   top->overlap_cycles, top->mac_count, dram.stats};
     result.host_seconds = lab::now()-begin;

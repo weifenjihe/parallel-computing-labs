@@ -14,6 +14,7 @@ add_library(lab1_core
   src/spmm_serial.cpp
   src/spmm_parallel.cpp
   src/spmm_tiled.cpp
+  src/verification.cpp
   src/benchmark.cpp
 )
 target_include_directories(lab1_core PUBLIC include)

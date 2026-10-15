@@ -49,7 +49,7 @@ Overlap 使用 `MPI_Ialltoallv` 发起交换，得到一个请求。当前程序
 
 ## 5. 动手试一试
 
-按[操作步骤](run.md)构建并执行默认配置。先固定规模和进程数，在不同 profile 下比较 Broadcast、Allgather、Halo 和 Overlap。
+按[操作步骤](run.md)构建并通过快速验证后，运行完整测量。先固定规模和进程数，在不同 profile 下比较 Broadcast、Allgather、Halo 和 Overlap。
 
 ### 看通信量
 

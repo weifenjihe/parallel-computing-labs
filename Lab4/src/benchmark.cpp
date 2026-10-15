@@ -1,4 +1,5 @@
 #include "benchmark.hpp"
+#include "verification.hpp"
 #include "support.hpp"
 #include <array>
 
@@ -71,6 +72,7 @@ void benchmark(const Config& cfg, MPI_Comm comm) {
         double checksum = 0;
         MPI_Reduce(&local_checksum, &checksum, 1, MPI_DOUBLE, MPI_SUM, 0, comm);
         auto ranks = collect(stat, d, comm);
+        if (cfg.verify) verify_output(a, c, cfg, d, comm);
         if (d.rank == 0 && trial >= 0) {
             times.push_back(elapsed); checksums.push_back(checksum); samples.push_back(std::move(ranks));
         }

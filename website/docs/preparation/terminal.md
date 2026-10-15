@@ -43,18 +43,18 @@ Lab2～Lab4 的组织方式相近。Lab5 另外有 `rtl/`，保存 SystemVerilog
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 4
-python3 run.py
+python3 run.py --help
 ```
 
-第一行让 CMake 读取当前目录 `.` 中的构建配置，把生成文件放到 `build/`。第二行编译源码。第三行运行当前实验的测量脚本。
+第一行让 CMake 读取当前目录 `.` 中的构建配置，把生成文件放到 `build/`。第二行编译源码。第三行查看当前实验的参数；随后按操作页的快速验证命令运行，确认环境与结果。
 
 `--parallel 4` 指编译时最多并行执行四项构建工作。**它不决定实验程序的线程数或 MPI 进程数**；运行程序的并行度由 `--threads`、`--ranks` 或 `mpiexec -n` 设置。
 
 对 Lab5：
 
 ```bash
-python3 build.py
-python3 run.py
+python3 build.py --array 8
+python3 run.py --m 32 --array 8 --tile 16 --verify --output results/quick
 ```
 
 修改 C++ 或 RTL 后，重新构建，再运行程序。

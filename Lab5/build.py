@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from cli_utils import positive_int, run_main
 
 HERE = Path(__file__).resolve().parent
 
@@ -19,8 +20,12 @@ def binary_path(array, spm_tile=64, spm_k=128):
 
 
 def build(array, spm_tile=64, spm_k=128, jobs=2):
+    if array not in [4, 8, 16] or spm_tile < array or spm_tile % array != 0 or spm_k < 1 or jobs < 1:
+        raise RuntimeError("构建参数无效：array=4/8/16，spm-tile 为 array 的正整数倍，spm-k/jobs>0。")
     tool = shutil.which("verilator")
     compiler = shutil.which(os.environ.get("CXX", "c++"))
+    if tool is None or compiler is None:
+        raise RuntimeError("找不到 Verilator 或 C++ 编译器，请按 README 安装依赖并检查 PATH/CXX。")
     metadata = {"array": array, "spm_tile": spm_tile, "spm_k": spm_k,
                 "verilator": subprocess.check_output([tool, "--version"], text=True).strip(),
                 "compiler": compiler,
@@ -52,7 +57,8 @@ def build(array, spm_tile=64, spm_k=128, jobs=2):
         print(f"Building array={array}, SPM tile={spm_tile}, K={spm_k}", file=sys.stderr, flush=True)
         result = subprocess.run(command, cwd=stage, text=True, capture_output=True)
         (binary.parent/"build.log").write_text(result.stdout+result.stderr)
-        result.check_returncode()
+        if result.returncode:
+            raise RuntimeError(f"Verilator 构建失败（退出码 {result.returncode}），详情见 {binary.parent/'build.log'}。")
         shutil.copy2(stage/"obj/sim", binary)
         stamp.write_text(key)
     (binary.parent/"build_environment.json").write_text(json.dumps(metadata, indent=2)+"\n")
@@ -61,12 +67,12 @@ def build(array, spm_tile=64, spm_k=128, jobs=2):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--array", type=int, choices=[4, 8, 16], nargs="+", default=[4, 8, 16])
-    parser.add_argument("--spm-tile", type=int, default=64)
-    parser.add_argument("--spm-k", type=int, default=128)
-    parser.add_argument("--jobs", type=int, default=2)
+    parser.add_argument("--array", type=positive_int, choices=[4, 8, 16], nargs="+", default=[4, 8, 16])
+    parser.add_argument("--spm-tile", type=positive_int, default=64)
+    parser.add_argument("--spm-k", type=positive_int, default=128)
+    parser.add_argument("--jobs", type=positive_int, default=2)
     args = parser.parse_args()
     for array in sorted(set(args.array)): print(build(array, args.spm_tile, args.spm_k, args.jobs))
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__": run_main(main)

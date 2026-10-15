@@ -16,6 +16,7 @@ add_library(lab4_core
   src/spmm_full.cpp
   src/spmm_halo.cpp
   src/spmm_overlap.cpp
+  src/verification.cpp
   src/benchmark.cpp
 )
 target_include_directories(lab4_core PUBLIC include)

@@ -65,9 +65,12 @@ https://madrid1011.github.io/parallel-computing-labs/
 
 ### 2. 发布静态页面分支
 
+当前仓库已经有远程 `gh-pages`。每次发布前先同步这个远程分支的引用，让生成的页面提交沿用最新发布历史；这对只克隆了 `main` 的副本尤其重要。
+
 在 `website/` 中，激活环境后执行：
 
 ```bash
+git fetch origin gh-pages:refs/remotes/origin/gh-pages
 python3 -m mkdocs gh-deploy --strict --remote-name origin --remote-branch gh-pages
 ```
 
@@ -84,7 +87,7 @@ python3 -m mkdocs gh-deploy --strict --remote-name origin --remote-branch gh-pag
 
 ### 4. 更新网站
 
-修改并保存源码，在本地预览确认后，提交源码，再从 `website/` 重新执行相同的 `gh-deploy` 命令。
+修改并保存源码，在本地预览确认后，提交并推送源码，再从 `website/` 重新执行上面的远程分支同步与 `gh-deploy` 两条命令。
 
 此方式不添加自定义 GitHub Actions 构建或实验检查文件。GitHub Pages 自身仍使用平台的部署流程发布静态页面。
 

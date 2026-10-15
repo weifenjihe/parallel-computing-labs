@@ -1,4 +1,5 @@
 #include "benchmark.hpp"
+#include "verification.hpp"
 #include "support.hpp"
 
 namespace histogram {
@@ -24,6 +25,7 @@ void benchmark(const Config& cfg) {
         else private_counts(input, counts, workspace, execution);
         const double elapsed = lab::now() - start;
         const auto checksum = std::accumulate(counts.begin(), counts.end(), std::uint64_t{0});
+        if (cfg.verify) verify_output(input, counts);
         if (trial >= 0) {
             times.push_back(elapsed);
             checksums.push_back(checksum);

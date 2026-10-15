@@ -13,6 +13,7 @@ add_library(lab2_core
   src/transpose_serial.cpp
   src/transpose_parallel.cpp
   src/transpose_tiled.cpp
+  src/verification.cpp
   src/benchmark.cpp
 )
 target_include_directories(lab2_core PUBLIC include)

@@ -13,12 +13,15 @@ def main():
     args = parser.parse_args()
     target = args.output.resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
+    build_dirs = {p.parent for p in ROOT.rglob("CMakeCache.txt")}
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
         for source in sorted(ROOT.rglob("*")):
             relative = source.relative_to(ROOT)
             if not source.is_file() or source.resolve() == target:
                 continue
             if any(part in {"build", "results", "__pycache__", ".venv", ".cache", ".pytest_cache", "node_modules"} for part in relative.parts):
+                continue
+            if any(part.startswith("build-") for part in relative.parts) or any(parent in build_dirs for parent in source.parents):
                 continue
             if relative.parts[:2] == ("website", "site"):
                 continue

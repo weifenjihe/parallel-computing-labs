@@ -69,7 +69,7 @@ for (size_t ii = 0; ii < N; ii += tile) {
 
 ## 6. 动手试一试
 
-按[操作步骤](run.md)构建后执行默认运行。固定一个 N 和线程数，比较 Naive 与不同 tile 的时间；再固定 tile，看它在不同 N 下的表现。
+按[操作步骤](run.md)构建后先执行快速验证，再运行完整测量。固定一个 N 和线程数，比较 Naive 与不同 tile 的时间；再固定 tile，看它在不同 N 下的表现。
 
 ```bash
 python3 run.py --n 4096 --tile 16 32 64 128 --output results/n4096

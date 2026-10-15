@@ -16,6 +16,7 @@ add_library(lab3_core
   src/histogram_atomic.cpp
   src/histogram_locks.cpp
   src/histogram_private.cpp
+  src/verification.cpp
   src/benchmark.cpp
 )
 target_include_directories(lab3_core PUBLIC include)

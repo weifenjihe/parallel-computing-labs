@@ -19,6 +19,8 @@ Lab3/
     histogram.hpp              计数内核、工作空间和线程统计
     benchmark.hpp              运行参数
     support.hpp                计时、随机数和 CSV 工具
+    validation.hpp             命令行值与范围检查
+    verification.hpp           参考结果核对接口
   src/
     main.cpp                   命令行参数
     input.cpp                  输入生成
@@ -29,6 +31,8 @@ Lab3/
     histogram_locks.cpp        分段锁
     histogram_private.cpp      线程私有计数和合并
     benchmark.cpp              预热、测量和 CSV 输出
+    verification.cpp           逐元素或逐桶参考比较
+  cli_utils.py                参数与构建目录检查
   run.py                       顺序测量和汇总
 ```
 
@@ -63,15 +67,36 @@ source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
 
-## 构建与运行
+## 构建
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 4
+```
+
+## 第一次运行：快速验证
+
+先运行这组小配置，确认环境、程序和输出均正常：
+
+```bash
+python3 run.py --n 10000 --stripes 1 16 --repeat 1 --rounds 1 \
+  --verify --output results/quick
+```
+
+终端会显示 `Lab3 i/34` 的配置进度，并出现 `VERIFY PASS: 256 buckets`。PASS 后的误差或说明因实验而异。运行完成后，检查 `results/quick/environment.json`、`raw.csv`、`summary.csv` 和比较图表。
+
+`--verify` 在计时之外逐元素或逐桶比较参考结果。错误会显示 `VERIFY FAIL`、第一个错误位置与期望值，并以非零退出码停止。浮点乘法使用 `1e-10 + 1e-9 × |参考值|` 的误差阈值；转置、计数和整数 GEMM 精确比较。**小配置只确认功能，不能用于正式性能结论。**
+
+## 完整测量
+
+确认快速验证通过后，再运行完整默认扫描：
+
+```bash
 python3 run.py
 ```
 
-默认扫描 100 万、500 万、1000 万个输入，运行 uniform 和 hotspot 两种分布。每组输入运行串行、全局临界区、原子加、1/4/16/64 把分段锁和线程私有计数，扫描 1、2、4 线程。编译产物保存在本实验的 `build/`，运行数据保存在本实验的 `results/`。
+
+完整默认扫描会启动 414 次独立程序。临界区和热点锁更新会串行化，完整扫描可能超过十分钟；首次操作请用上面的快速验证。默认扫描 100 万、500 万、1000 万个输入，运行 uniform 和 hotspot 两种分布。每组输入运行串行、全局临界区、原子加、1/4/16/64 把分段锁和线程私有计数，扫描 1、2、4 线程。编译产物保存在本实验的 `build/`，运行数据保存在本实验的 `results/`。
 
 ## 设置运行参数
 
@@ -89,6 +114,8 @@ python3 run.py
 | `--rounds` | 3 | 测量批次数 |
 | `--seed` | 2026 | 输入随机种子 |
 | `--output` | `results/` | 输出目录 |
+| `--verify` | 关闭 | 在计时之外逐元素或逐桶核对结果 |
+| `--build-dir` | `build/` | 选择构建目录；相对路径从本 Lab 目录解析 |
 
 指定全部主要参数：
 
@@ -98,7 +125,23 @@ python3 run.py --n 1000000 5000000 10000000 --bins 256 --stripes 1 4 16 64 \
   --repeat 7 --rounds 3 --seed 2026
 ```
 
-修改 C++ 源码后，执行 `cmake --build build --parallel 4`，再运行 `python3 run.py`。
+修改 C++ 源码后，先执行 `cmake --build build --parallel 4` 并重新运行快速验证，再进行正式测量。
+
+## 参数范围与错误提示
+
+N、bins、stripes、threads、repeat、rounds 必须为正整数；锁数可以超过桶数。`hot-percent` 为 0～100，`seed` 为 0～4294967295。
+
+程序与脚本会拒绝未知参数、缺失参数值和非法配置，并给出明确原因。可执行文件和 `run.py` 均支持 `--help`。
+
+切换到新构建目录时，构建和测量必须选择同一个目录，例如：
+
+```bash
+cmake -S . -B build-llvm -DCMAKE_BUILD_TYPE=Release
+cmake --build build-llvm --parallel 4
+python3 run.py --build-dir build-llvm --help
+```
+
+实际测量时，把 `--build-dir build-llvm` 加到上面的快速验证命令或自己的参数组合中。`environment.json` 会记录实际构建目录与编译器。
 
 ## 输入分布
 
@@ -164,6 +207,17 @@ for hot in 50 90 99; do
 done
 ```
 
+## 怎样完成一组观察
+
+每次固定输入与其他条件，只改变表中的一项。先核对正确性，再读取数据解释变化：
+
+| 固定条件 | 改变哪一项 | 从哪里读数据 | 要回答的问题 |
+|---|---|---|---|
+| N、bins、分布和线程数固定 | Critical → Atomic → Locks → Private | median_ms；线程 compute_s、merge_s、wait_s | 哪些共享更新被消除，增加了哪些合并工作？ |
+| N、bins、线程数和热点比例固定 | stripes=1、4、16、64 | lock_count_speedup；对照 uniform / hotspot | 为什么更多锁不能分散对桶 0 的竞争？ |
+
+为每组比较保留完整命令、环境文件、原始记录和汇总表；用一张对比表记录参数、耗时或周期，再写出“观察到什么、实现中哪一步能解释它”。性能趋势取决于机器与输入，不要求某个版本一定更快。
+
 ## 输出文件
 
 `run.py` 默认将本次运行的数据保存到本实验的 `results/`，使用 `--output` 可以更改目录。
@@ -178,6 +232,9 @@ done
 | `environment.json` | 输入参数、编译器、CPU 和测量设置 |
 
 默认每次独立执行先预热一次，再测量七次并取中位数；进行三个批次后再取中位数。计时包含并行区域启动、循环调度、计数更新、线程屏障和私有计数合并；输入生成、表清零、锁初始化、输出汇总和 checksum 计算在计时之外。
+
+
+终端的 `i/total` 统计独立配置启动次数，每次启动还包含自己的预热与重复测量。`raw.csv` 在每个配置完成后保存，`summary.csv` 和最终图表在全部配置完成后生成。按 Ctrl+C 中断会保留已完成的原始记录；部分数据不能视为完整扫描结果。再次运行请换一个 `--output` 目录；脚本会重新测量，不自动续跑。
 
 常用 CSV 字段：
 
@@ -197,3 +254,5 @@ done
 | `wait_s` | 线程屏障等待耗时 |
 | `merge_s` | 私有计数合并阶段耗时，已包含在 `compute_s` 中 |
 | `checksum` | 全部 bucket 的计数之和 |
+
+如果实际线程数少于请求值，脚本会明确指出差异并停止汇总。检查 `OMP_THREAD_LIMIT` 等设置，或改用允许的 `--threads`；不要把实际两线程的记录当作四线程结果。

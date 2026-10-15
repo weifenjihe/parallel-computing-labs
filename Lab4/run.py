@@ -15,6 +15,8 @@ import statistics
 import subprocess
 import sys
 
+from cli_utils import positive_int, nonnegative_int, seed_int, percentage, build_directory, check_threads, run_main
+
 HERE = Path(__file__).resolve().parent
 VARIANTS = [("Broadcast", "broadcast"), ("Allgather", "allgather"),
             ("Halo", "halo"), ("Overlap", "overlap")]
@@ -27,7 +29,7 @@ def save(rows, destination):
         writer.writeheader(); writer.writerows(rows)
 
 
-def environment(launcher):
+def environment(launcher, build_dir):
     info = {"recorded_at_utc": datetime.now(timezone.utc).isoformat(),
             "system": platform.system(), "architecture": platform.machine(),
             "logical_cpus": os.cpu_count(), "python": platform.python_version(),
@@ -38,7 +40,8 @@ def environment(launcher):
     if platform.system() == "Darwin":
         for key in ["machdep.cpu.brand_string", "hw.perflevel0.physicalcpu", "hw.perflevel1.physicalcpu"]:
             info[key] = subprocess.run(["sysctl", "-n", key], text=True, capture_output=True).stdout.strip()
-    cache = HERE / "build/CMakeCache.txt"
+    cache = build_dir / "CMakeCache.txt"
+    info["build_directory"] = str(build_dir)
     info["compiler"] = next(line.split("=", 1)[1] for line in cache.read_text().splitlines()
                             if line.startswith("CMAKE_CXX_COMPILER:"))
     info["build_type"] = next(line.split("=", 1)[1] for line in cache.read_text().splitlines()
@@ -49,13 +52,16 @@ def environment(launcher):
 
 def run_benchmark(output, ranks=4, sizes=(4096, 8192, 16384), k=8192, n=1024,
                   nnz_per_row=32, tile=128, block_nnz=256, partition="nnz",
-                  profiles=PROFILES, repeat=7, rounds=3, seed=2026, hostfile=None):
+                  profiles=PROFILES, repeat=7, rounds=3, seed=2026, hostfile=None, build_dir=None, verify=False):
+    build_dir = build_directory(HERE, build_dir, "lab4_spmm")
     output = Path(output); output.mkdir(parents=True, exist_ok=True)
     counts = sorted({1, ranks} | ({2} if ranks >= 2 else set()))
     sizes = sorted(set(sizes)); profiles = list(dict.fromkeys(profiles))
     launcher = shutil.which("mpiexec") or shutil.which("mpirun")
+    if launcher is None:
+        raise RuntimeError("找不到 mpiexec/mpirun，请先安装 MPI 并检查 PATH。")
     launch_options = ["--hostfile", str(Path(hostfile).resolve())] if hostfile else []
-    metadata = environment(launcher)
+    metadata = environment(launcher, build_dir)
     if "Open MPI" in metadata["mpi_version"] or "OpenRTE" in metadata["mpi_version"]:
         launch_options.append("--oversubscribe")
     metadata.update({"m_sizes": sizes, "k": k, "n": n, "nnz_per_row": nnz_per_row,
@@ -65,24 +71,32 @@ def run_benchmark(output, ranks=4, sizes=(4096, 8192, 16384), k=8192, n=1024,
                      "hostfile": str(Path(hostfile).resolve()) if hostfile else None,
                      "launch_options": launch_options,
                      "timing": "Maximum rank time including packing, B exchange and local multiplication",
-                     "golden_ratio_commit": "fb012f772374bf826f81582a31e95455c91fcb26"})
+                     "verify": verify, "golden_ratio_commit": "fb012f772374bf826f81582a31e95455c91fcb26"})
     (output / "environment.json").write_text(json.dumps(metadata, indent=2, ensure_ascii=False) + "\n")
     raw = []
     cases = [(label, kernel, workers) for workers in counts for label, kernel in VARIANTS]
     randomizer = random.Random(seed)
 
+    completed = 0
+    total = rounds * len(sizes) * len(profiles) * (len(cases) + 2)
+
     def measure(m, profile, outer, label, kernel, workers):
+        nonlocal completed
         options = {"m": m, "k": k, "n": n, "nnz-per-row": nnz_per_row, "tile": tile,
                    "block-nnz": block_nnz, "partition": partition, "profile": profile,
                    "kernel": kernel, "repeat": repeat, "seed": seed}
-        command = [launcher, *launch_options, "-n", str(workers), str(HERE / "build/lab4_spmm")]
+        command = [launcher, *launch_options, "-n", str(workers), str(build_dir / "lab4_spmm")]
+        if verify:
+            command.append("--verify")
         for name, value in options.items(): command.extend(["--" + name, str(value)])
-        print(f"Lab4 round {outer + 1}/{rounds}: M={m}, {profile}, {label}, ranks={workers}",
+        print(f"Lab4 {completed + 1}/{total} | round {outer + 1}/{rounds}: M={m}, {profile}, {label}, ranks={workers}",
               file=sys.stderr, flush=True)
         result = subprocess.check_output(command, text=True)
         for row in csv.DictReader(io.StringIO(result)):
             row.update(round=outer, variant=label, requested_ranks=workers)
             raw.append(row)
+        completed += 1
+        save(raw, output / "raw.csv")
 
     for outer in range(rounds):
         workloads = [(m, profile) for m in sizes for profile in profiles]
@@ -136,25 +150,29 @@ def run_benchmark(output, ranks=4, sizes=(4096, 8192, 16384), k=8192, n=1024,
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--m", type=int, nargs="+", default=[4096, 8192, 16384])
-    parser.add_argument("--k", type=int, default=8192)
-    parser.add_argument("--n", type=int, default=1024)
-    parser.add_argument("--nnz-per-row", type=int, default=32)
-    parser.add_argument("--ranks", type=int, default=4)
-    parser.add_argument("--tile", type=int, default=128)
-    parser.add_argument("--block-nnz", type=int, default=256)
+    parser.add_argument("--m", type=positive_int, nargs="+", default=[4096, 8192, 16384])
+    parser.add_argument("--k", type=positive_int, default=8192)
+    parser.add_argument("--n", type=positive_int, default=1024)
+    parser.add_argument("--nnz-per-row", type=nonnegative_int, default=32)
+    parser.add_argument("--ranks", type=positive_int, default=4)
+    parser.add_argument("--tile", type=positive_int, default=128)
+    parser.add_argument("--block-nnz", type=positive_int, default=256)
     parser.add_argument("--partition", choices=["rows", "nnz"], default="nnz")
     parser.add_argument("--profile", choices=PROFILES, nargs="+", default=PROFILES)
-    parser.add_argument("--repeat", type=int, default=7)
-    parser.add_argument("--rounds", type=int, default=3)
-    parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument("--repeat", type=positive_int, default=7)
+    parser.add_argument("--rounds", type=positive_int, default=3)
+    parser.add_argument("--seed", type=seed_int, default=2026)
     parser.add_argument("--hostfile", type=Path)
     parser.add_argument("--output", type=Path, default=HERE / "results")
+    parser.add_argument("--build-dir", type=Path, default=HERE / "build", help="构建目录，例如 build-llvm")
+    parser.add_argument("--verify", action="store_true", help="计时之外逐元素/逐桶核对结果")
     args = parser.parse_args()
+    if args.nnz_per_row > args.k:
+        parser.error("--nnz-per-row 不能超过 --k；缩小矩阵时请同步缩小每行非零数。")
     run_benchmark(args.output, ranks=args.ranks, sizes=args.m, k=args.k, n=args.n,
                   nnz_per_row=args.nnz_per_row, tile=args.tile, block_nnz=args.block_nnz,
                   partition=args.partition, profiles=args.profile, repeat=args.repeat,
-                  rounds=args.rounds, seed=args.seed, hostfile=args.hostfile)
+                  rounds=args.rounds, seed=args.seed, hostfile=args.hostfile, build_dir=args.build_dir, verify=args.verify)
 
 
 if __name__ == "__main__": main()

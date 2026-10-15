@@ -1,4 +1,5 @@
 #include "simulator.hpp"
+#include "verification.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -13,6 +14,8 @@ void benchmark(const Config& cfg) {
     std::vector<std::size_t> order(samples.size()); std::iota(order.begin(),order.end(),0);
     std::sort(order.begin(),order.end(),[&](auto a,auto b){ return samples[a].cycles<samples[b].cycles; });
     const auto middle = order[order.size()/2];
+    if (cfg.verify)
+        for (const auto& sample : samples) verify_output(cfg, sample.output);
     if (!cfg.dump_output.empty()) {
         std::ofstream stream(cfg.dump_output,std::ios::binary);
         const auto& output = samples[middle].output;

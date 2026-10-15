@@ -23,11 +23,14 @@ def on_page_markdown(markdown, page, config, files):
 def on_files(files, config):
     for number in range(1, 6):
         lab = ROOT / f"Lab{number}"
+        build_dirs = {p.parent for p in lab.rglob("CMakeCache.txt")}
         archive = BytesIO()
         with ZipFile(archive, "w", ZIP_DEFLATED) as output:
             for path in sorted(lab.rglob("*")):
                 relative = path.relative_to(lab)
                 if (not path.is_file() or OMIT.intersection(relative.parts)
+                        or any(part.startswith("build-") for part in relative.parts)
+                        or any(parent in build_dirs for parent in path.parents)
                         or path.name == ".DS_Store" or path.suffix in {".pyc", ".vcd", ".fst"}):
                     continue
                 output.write(path, str(Path(lab.name) / relative))

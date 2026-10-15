@@ -77,6 +77,17 @@ Lab4 按其文档安装 Open MPI，Lab5 按其文档安装 Verilator。
 !!! tip "切换编译器后如何重新构建？"
     CMake 会记住第一次配置时选用的编译器。如果原来的 `build/` 使用了另一个编译器，可以保留它，改用一个新的构建目录，例如 `build-llvm/`。此时后续运行可执行文件也要使用新目录中的路径。
 
+    测量脚本也需要选择这个目录，否则无法确认是否运行了新程序。以 Lab1 为例：
+
+    ```bash
+    cmake -S . -B build-llvm -DCMAKE_BUILD_TYPE=Release
+    cmake --build build-llvm --parallel 4
+    python3 run.py --build-dir build-llvm --m 256 --k 512 --n 64 \
+      --nnz-per-row 8 --repeat 1 --rounds 1 --verify --output results/quick_llvm
+    ```
+
+    `--build-dir` 适用于 Lab1～Lab4，`environment.json` 会记录实际目录与编译器。
+
     也可以仅删除当前实验生成的 `build/` 后重新配置；源码位于 `src/` 和 `include/`，Lab5 的 RTL 位于 `rtl/`。
 
 ## Python 虚拟环境

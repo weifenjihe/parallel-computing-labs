@@ -14,6 +14,8 @@ import statistics
 import subprocess
 import sys
 
+from cli_utils import positive_int, nonnegative_int, seed_int, percentage, build_directory, check_threads, run_main
+
 HERE = Path(__file__).resolve().parent
 DEFAULT_SIZES = [2048, 3072, 4096, 6144, 8192]
 DEFAULT_TILES = [16, 32, 64, 128]
@@ -25,7 +27,7 @@ def save(rows, destination):
         writer.writeheader(); writer.writerows(rows)
 
 
-def environment():
+def environment(build_dir):
     info = {"recorded_at_utc": datetime.now(timezone.utc).isoformat(),
             "system": platform.system(), "architecture": platform.machine(),
             "logical_cpus": os.cpu_count(), "python": platform.python_version(),
@@ -33,41 +35,53 @@ def environment():
     if platform.system() == "Darwin":
         for key in ["machdep.cpu.brand_string", "hw.perflevel0.physicalcpu", "hw.perflevel1.physicalcpu"]:
             info[key] = subprocess.run(["sysctl", "-n", key], text=True, capture_output=True).stdout.strip()
-    cache = HERE / "build/CMakeCache.txt"
+    cache = build_dir / "CMakeCache.txt"
+    info["build_directory"] = str(build_dir)
     info["compiler"] = next(line.split("=", 1)[1] for line in cache.read_text().splitlines()
                             if line.startswith("CMAKE_CXX_COMPILER:"))
     info["compiler_version"] = subprocess.check_output([info["compiler"], "--version"], text=True).splitlines()[0]
     return info
 
 
-def run_benchmark(output, threads=4, sizes=None, tiles=None, repeat=7, rounds=3, seed=2026):
+def run_benchmark(output, threads=4, sizes=None, tiles=None, repeat=7, rounds=3, seed=2026, build_dir=None, verify=False):
     sizes = sorted(set(DEFAULT_SIZES if sizes is None else sizes))
     tiles = sorted(set(DEFAULT_TILES if tiles is None else tiles))
+    build_dir = build_directory(HERE, build_dir, "lab2_locality")
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     counts = sorted({1, threads} | ({2} if threads >= 2 else set()))
     variants = [("Naive", "naive", tiles[0])] + [(f"Tile{tile}", "tiled", tile) for tile in tiles]
     cases = [(label, kernel, tile, workers) for workers in counts for label, kernel, tile in variants]
-    metadata = environment()
+    metadata = environment(build_dir)
     metadata.update({"matrix_sizes": sizes, "tile_sizes": tiles, "repeats": repeat, "rounds": rounds,
                      "warmups_per_process": 1, "requested_threads": counts, "seed": seed,
-                     "golden_ratio_commit": "fb012f772374bf826f81582a31e95455c91fcb26"})
+                     "verify": verify, "golden_ratio_commit": "fb012f772374bf826f81582a31e95455c91fcb26"})
     (output / "environment.json").write_text(json.dumps(metadata, indent=2, ensure_ascii=False) + "\n")
     raw = []
     randomizer = random.Random(seed)
 
+    completed = 0
+    total = rounds * len(sizes) * (len(cases) + 2)
+
     def measure(n, outer, label, kernel, tile, workers):
+        nonlocal completed
         options = {"n": n, "tile": tile, "seed": seed, "kernel": kernel,
                    "threads": workers, "repeat": repeat}
-        command = [str(HERE / "build/lab2_locality")]
+        command = [str(build_dir / "lab2_locality")]
+        if verify:
+            command.append("--verify")
         for name, value in options.items():
             command.extend(["--" + name, str(value)])
-        print(f"Lab2 round {outer + 1}/{rounds}: N={n}, {label}, threads={workers}",
+        print(f"Lab2 {completed + 1}/{total} | round {outer + 1}/{rounds}: N={n}, {label}, threads={workers}",
               file=sys.stderr, flush=True)
         output_text = subprocess.check_output(command, text=True)
-        for row in csv.DictReader(io.StringIO(output_text)):
+        records = list(csv.DictReader(io.StringIO(output_text)))
+        check_threads(records, workers)
+        for row in records:
             row.update(round=outer, variant=label, requested_threads=workers)
             raw.append(row)
+        completed += 1
+        save(raw, output / "raw.csv")
 
     for outer in range(rounds):
         order_sizes = sizes.copy(); randomizer.shuffle(order_sizes)
@@ -116,17 +130,19 @@ def run_benchmark(output, threads=4, sizes=None, tiles=None, repeat=7, rounds=3,
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--n", type=int, nargs="+", default=DEFAULT_SIZES)
-    parser.add_argument("--tile", type=int, nargs="+", default=DEFAULT_TILES)
-    parser.add_argument("--threads", type=int, default=4)
-    parser.add_argument("--repeat", type=int, default=7)
-    parser.add_argument("--rounds", type=int, default=3)
-    parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument("--n", type=positive_int, nargs="+", default=DEFAULT_SIZES)
+    parser.add_argument("--tile", type=positive_int, nargs="+", default=DEFAULT_TILES)
+    parser.add_argument("--threads", type=positive_int, default=4)
+    parser.add_argument("--repeat", type=positive_int, default=7)
+    parser.add_argument("--rounds", type=positive_int, default=3)
+    parser.add_argument("--seed", type=seed_int, default=2026)
     parser.add_argument("--output", type=Path, default=HERE / "results")
+    parser.add_argument("--build-dir", type=Path, default=HERE / "build", help="构建目录，例如 build-llvm")
+    parser.add_argument("--verify", action="store_true", help="计时之外逐元素/逐桶核对结果")
     args = parser.parse_args()
     run_benchmark(args.output, threads=args.threads, sizes=args.n, tiles=args.tile,
-                  repeat=args.repeat, rounds=args.rounds, seed=args.seed)
+                  repeat=args.repeat, rounds=args.rounds, seed=args.seed, build_dir=args.build_dir, verify=args.verify)
 
 
 if __name__ == "__main__":
-    main()
+    run_main(main)

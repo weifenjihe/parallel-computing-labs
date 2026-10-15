@@ -45,7 +45,7 @@ C_block = A_block_0 × B_block_0
                  加载 1 ──────→ 加载 2 ──────→ ……
 ```
 
-切换缓冲区时，下一块必须已经准备好。若加载更慢，仍需要等待；若加载能在当前计算期间完成，就有机会隐藏这部分等待。最后的输出写回也需要计入总周期。
+阵列开始使用下一缓冲之前，输入数据必须准备好。控制器可以先切换 `current_buffer`，再在 `WAIT_INPUT` 中等待其 `buffer_ready`；若加载能在当前计算期间完成，就有机会隐藏这部分等待。最后的输出写回也需要计入总周期。
 
 !!! tip "比较双缓冲时固定其他条件"
     固定矩阵、阵列、三维分块和 DRAM 参数，只切换 `single` 与 `double`。如果同时把块从 16 改成 64，就无法单独判断缓冲方式贡献了多少变化。
@@ -68,7 +68,7 @@ pe_utilization = 有效乘加次数 / (总周期 × P²)
 
 ## 6. 动手试一试
 
-按[操作步骤](run.md)构建后执行默认运行，先固定阵列边长，在不同 tile 下比较单、双缓冲。
+按[操作步骤](run.md)构建后先执行快速验证，再运行完整测量，先固定阵列边长，在不同 tile 下比较单、双缓冲。
 
 ### 改变 DRAM 延迟
 
@@ -95,9 +95,43 @@ done
 
 ### 对照波形与阶段
 
-按操作页的命令保存 VCD，使用 GTKWave 等工具打开。先找到 `compute_active` 与读数据握手，再找到 `current_buffer`、`buffer_ready`，观察加载和计算是否在同一段时间进行。
+先生成一个易观察的小配置，固定握手停顿为 0，让两次运行更容易对照：
 
-波形只保存参数指定的周期窗口。当前窗口没有覆盖某次缓冲切换时，调整 `--trace-start` 和 `--trace-cycles`，保持矩阵配置不变。
+```bash
+python3 run.py --m 32 --k 64 --n 32 --array 8 --tile 16 --buffering double \
+  --stall-percent 0 --verify --trace results/buffering.vcd --trace-cycles 4096 \
+  --output results/buffering
+python3 plot_waveform.py --input results/buffering.vcd --output results/buffering.png
+```
+
+先打开生成的 PNG，就能查看关键波形；Windows 的 WSL2 和 macOS 都使用已有的 Python 环境，无需另装查看器。横轴是仿真周期，包含复位阶段。脚本默认选择第一次计算附近的 1200 个周期；可用 `--start 500 --cycles 1500` 改变观察窗口。
+
+[![双缓冲参考波形：计算、读数据握手与缓冲切换](../assets/lab5-buffering-waveform.png)](../assets/lab5-buffering-waveform.png)
+
+点击参考图可查看原图。
+
+这张图来自上面的 32×64×32、8×8 阵列、tile=16 配置。先在 `compute_active=1` 的区间查看 `r_valid & r_ready=1` 的数据拍，确认加载与计算发生重叠；再沿虚线找到 `current_buffer` 的切换，对照下一缓冲的 `buffer_ready`。下一缓冲尚未就绪时，计算仍需要等待。
+
+如果使用 GTKWave 等交互式查看器，按以下步骤查看完整 VCD：
+
+1. 在 Ubuntu 中可执行 `sudo apt install gtkwave`，然后 `gtkwave results/buffering.vcd`；已有查看器的 macOS 同学也可以直接打开此文件。
+2. 在层级树中展开 `TOP → matrix_accelerator`。选择 `clk`、`state`、`compute_active`、`current_buffer`、`buffer_ready`、`ar_valid/ready`、`r_valid/ready`，添加到波形列表。
+3. 先缩放到完整时间范围，找到第一次 `compute_active=1`，再框选它与首次缓冲切换附近的区间放大。
+4. 对多位 `state` 使用十进制显示，按下表识别阶段；若窗口未包含切换，增大 `--trace-cycles` 或调整 `--trace-start` 后重新生成。
+
+| state 值 | 阶段 | 可以观察什么 |
+|---|---|---|
+| 0 · IDLE | 空闲 | 等待 start |
+| 1 · TILE_INIT | 初始化输出块 | 准备分块与读 DMA |
+| 2 · ZERO_C | 清零 C 的 SPM | 为跨 K 累加准备空间 |
+| 3 · WAIT_INPUT | 等待输入 | 检查当前 buffer_ready |
+| 4 · CLEAR_PE | 清零阵列部分和 | 准备下一个微块 |
+| 5 · RUN_PE | 推进阵列 | compute_active=1，观察并行的读握手 |
+| 6 · STORE_C | 保存本次部分和 | 累加到 C 的 SPM |
+| 7 · WRITE_START | 启动写 DMA | 开始输出回写 |
+| 8 · WAIT_OUTPUT | 等待输出完成 | aw/w 握手与最后写响应 |
+
+VCD 中每个时钟周期有两个时间 tick；课程脚本换算成周期，并在上升沿之前采样握手。VCD 的 `1ps` 时间单位是仿真表示，不能据此推断真实芯片频率。
 
 ??? info "为什么不能用 host_seconds 判断阵列加速？"
     较大的 RTL 模型需要仿真器处理更多逻辑，同一个硬件周期可能花更多宿主机时间。`host_seconds` 反映仿真开销，`cycles` 反映当前设计完成任务的周期数。除非另有时钟频率和实现数据，不能把周期直接当成真实芯片的毫秒或主频性能。

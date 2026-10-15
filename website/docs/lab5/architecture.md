@@ -2,6 +2,25 @@
 
 这一页先认识各个模块，再沿着一个数据块追踪它的路径。
 
+
+<figure class="hardware-flow" aria-label="软件DRAM通过读DMA加载A和B到SPM，经阵列计算的部分和累加到C的SPM，再由写DMA回写同一软件DRAM">
+  <div class="hardware-flow-grid">
+    <div class="hardware-node flow-dram"><b>软件 DRAM</b><span>完整 A、B、C</span></div>
+    <span class="flow-arrow flow-read-1" aria-hidden="true">→</span>
+    <div class="hardware-node flow-read"><b>读 DMA</b><span>加载输入分块</span></div>
+    <span class="flow-arrow flow-read-2" aria-hidden="true">→</span>
+    <div class="hardware-node flow-ab"><b>A / B 的 SPM</b><span>buffer 0 / 1</span></div>
+    <span class="flow-arrow flow-read-3" aria-hidden="true">→</span>
+    <div class="hardware-node flow-array"><b>P × P 阵列</b><span>A 向右 · B 向下</span><span>PE 保存部分和</span></div>
+    <span class="flow-arrow flow-write-1" aria-hidden="true">←</span>
+    <div class="hardware-node flow-write"><b>写 DMA</b><span>回写输出分块</span></div>
+    <span class="flow-arrow flow-write-2" aria-hidden="true">←</span>
+    <div class="hardware-node flow-c"><b>C 的 SPM</b><span>跨 K 分块累加</span></div>
+    <span class="flow-arrow flow-write-3" aria-hidden="true">←</span>
+  </div>
+  <figcaption>沿上方路径加载与计算，沿下方路径回写。控制器安排加载、缓冲切换、部分和累加与下一块计算。</figcaption>
+</figure>
+
 ## 1. 软件 DRAM：保存完整矩阵
 
 软件 DRAM 是 C++ 中的一片存储，保存行优先的 A、B 和 C。RTL 发出读写请求后，软件模型经过设定延迟，按拍提供或接收数据。

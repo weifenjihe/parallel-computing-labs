@@ -1,5 +1,6 @@
 #include "matrix.hpp"
 #include "support.hpp"
+#include "validation.hpp"
 
 namespace spmm {
 DenseMatrix::DenseMatrix(std::size_t m, std::size_t n) : rows(m), cols(n), values(m * n) {}
@@ -18,6 +19,8 @@ std::size_t row_nonzeros(std::size_t row, std::size_t m, std::size_t k,
 CsrMatrix generate_sparse_rows(std::size_t begin, std::size_t end, std::size_t m,
                                std::size_t k, std::size_t nnz_per_row,
                                const std::string& profile, std::uint32_t seed) {
+    lab::positive(k, "K");
+    lab::require(nnz_per_row <= k, "nnz_per_row must not exceed K; duplicate CSR columns are not allowed.");
     CsrMatrix a;
     a.rows = end - begin; a.cols = k; a.row_ptr.push_back(0);
     for (std::size_t i = begin; i < end; ++i) {
