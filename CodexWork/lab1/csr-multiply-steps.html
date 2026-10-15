@@ -1,0 +1,166 @@
+<div id="csr-multiply-steps">
+  <div class="viz-controls">
+    <button type="button" class="btn" data-action="prev">上一步</button>
+    <button type="button" class="btn btn-primary" data-action="next">下一步</button>
+    <button type="button" class="btn" data-action="play">自动播放</button>
+    <span class="text-small text-muted" data-status></span>
+  </div>
+  <div class="csr-vars tabular-nums" aria-label="当前变量" data-vars></div>
+  <div class="csr-matrices" aria-label="A 乘 B 得到 C">
+    <section><h3>A · 3 × 4</h3><div data-matrix="a"></div></section>
+    <section><h3>B · 4 × 2</h3><div data-matrix="b"></div></section>
+    <section><h3>C · 3 × 2</h3><div data-matrix="c"></div></section>
+  </div>
+  <div class="csr-storage"><table class="table table-sm tabular-nums" aria-label="CSR 存储，列标题是数组下标" data-storage></table></div>
+  <div class="csr-detail tabular-nums" aria-live="polite" data-detail></div>
+  <pre class="csr-code"><code><span data-line="row">for (size_t i = 0; i &lt; M; ++i) {</span>
+<span data-line="load">  for (size_t p = row_ptr[i];
+       p &lt; row_ptr[i + 1]; ++p) {</span>
+<span data-line="load">    const size_t k = col_idx[p];
+    const double a = values[p];</span>
+<span data-line="update">    for (size_t j = 0; j &lt; N; ++j) {</span>
+<span data-line="update">      C[i * N + j] += a * B[k * N + j];</span>
+<span>    }
+  }
+}</span></code></pre>
+</div>
+<style>
+  #csr-multiply-steps { color: var(--foreground); }
+  #csr-multiply-steps .csr-vars { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 16px 0; }
+  #csr-multiply-steps .csr-vars span { white-space: nowrap; }
+  #csr-multiply-steps .csr-matrices { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 24px; }
+  #csr-multiply-steps .csr-matrices section { flex: 1 1 160px; min-width: 0; }
+  #csr-multiply-steps h3 { margin: 0 0 8px; font-weight: 500; }
+  #csr-multiply-steps .csr-matrix { border-collapse: separate; border-spacing: 3px; width: 100%; table-layout: fixed; }
+  #csr-multiply-steps .csr-matrix td { text-align: center; padding: 7px 0; background: var(--muted); color: var(--foreground); }
+  #csr-multiply-steps .csr-matrix th { font-weight: 400; color: var(--muted-foreground); text-align: center; }
+  #csr-multiply-steps .csr-matrix th:first-child { width: 20px; }
+  #csr-multiply-steps .csr-matrix td.csr-zero { color: var(--muted-foreground); }
+  #csr-multiply-steps .csr-matrix td.csr-row { background: color-mix(in srgb, var(--viz-series-1) 13%, var(--background)); }
+  #csr-multiply-steps .csr-matrix td.csr-active { background: color-mix(in srgb, var(--viz-series-1) 30%, var(--background)); font-weight: 500; box-shadow: inset 0 -3px var(--viz-series-1); color: var(--foreground); }
+  #csr-multiply-steps .csr-storage { margin-top: 14px; }
+  #csr-multiply-steps .csr-storage th { font-weight: 400; }
+  #csr-multiply-steps .csr-storage td, #csr-multiply-steps .csr-storage th { text-align: center; }
+  #csr-multiply-steps .csr-storage th:first-child { text-align: left; }
+  #csr-multiply-steps .csr-storage .csr-active { background: color-mix(in srgb, var(--viz-series-1) 25%, var(--background)); box-shadow: inset 0 -3px var(--viz-series-1); }
+  #csr-multiply-steps .csr-storage .csr-range { background: color-mix(in srgb, var(--viz-series-1) 12%, var(--background)); }
+  #csr-multiply-steps .csr-detail { margin: 14px 0; min-height: 3em; overflow-wrap: anywhere; }
+  #csr-multiply-steps .csr-code { margin: 0; white-space: normal; overflow-wrap: anywhere; color: var(--foreground); }
+  #csr-multiply-steps .csr-code span { display: block; white-space: pre-wrap; }
+  #csr-multiply-steps .csr-code .csr-current { background: color-mix(in srgb, var(--viz-series-1) 13%, var(--background)); box-shadow: inset 3px 0 var(--viz-series-1); }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('csr-multiply-steps');
+  const A = [[2,0,0,5],[0,3,0,0],[4,0,7,0]];
+  const B = [[1,2],[3,4],[5,6],[7,8]];
+  const values = [2,5,3,4,7], colIdx = [0,3,1,0,2], rowPtr = [0,2,3,5];
+  const M = 3, N = 2;
+  const events = [{type:'init'}];
+  for (let i = 0; i < M; i++) {
+    events.push({type:'row', i});
+    for (let p = rowPtr[i]; p < rowPtr[i+1]; p++) {
+      const k = colIdx[p], a = values[p];
+      events.push({type:'load', i, p, k, a});
+      for (let j = 0; j < N; j++) events.push({type:'update', i, p, k, a, j});
+    }
+  }
+  events.push({type:'done'});
+  let step = 2, timer = null;
+  const instanceId = Math.random().toString(36).slice(2);
+  const prev = root.querySelector('[data-action="prev"]');
+  const next = root.querySelector('[data-action="next"]');
+  const play = root.querySelector('[data-action="play"]');
+  function validStep(state) {
+    const candidate = state?.privateContent?.version === 2 ? state.privateContent.step : undefined;
+    return Number.isInteger(candidate) && candidate >= 0 && candidate < events.length ? candidate : 2;
+  }
+  step = validStep(window.openai?.widgetState);
+  function save() {
+    const e = events[step];
+    try {
+      const result = window.openai?.setWidgetState?.({modelContent:{example:'CSR 矩阵乘法',step,operation:e},privateContent:{step,instanceId,version:2}});
+      Promise.resolve(result).catch(() => {});
+    } catch (_) { /* Persistence must never interrupt local playback. */ }
+  }
+  function matrix(name, data, e) {
+    const labels = data[0].map((_, j) => `<th scope="col">${j}</th>`).join('');
+    let html = `<table class="csr-matrix tabular-nums" aria-label="矩阵 ${name.toUpperCase()}，表头为从 0 开始的行列号"><thead><tr><th></th>${labels}</tr></thead><tbody>`;
+    data.forEach((row, r) => {
+      html += `<tr><th scope="row">${r}</th>`;
+      row.forEach((v, c) => {
+        const hasElement = e.type === 'load' || e.type === 'update';
+        const active = (name === 'a' && hasElement && r === e.i && c === e.k)
+          || (name === 'b' && e.type === 'update' && r === e.k && c === e.j)
+          || (name === 'c' && e.type === 'update' && r === e.i && c === e.j);
+        const rowOn = (name === 'a' || name === 'c') ? r === e.i : hasElement && r === e.k;
+        const cls = active ? 'csr-active' : rowOn ? 'csr-row' : v === 0 ? 'csr-zero' : '';
+        html += `<td class="${cls}" aria-label="${name.toUpperCase()}[${r},${c}] = ${v}${active ? '，当前元素' : ''}">${v}</td>`;
+      });
+      html += '</tr>';
+    });
+    return html + '</tbody></table>';
+  }
+  function render() {
+    const e = events[step], C = Array.from({length:M}, () => Array(N).fill(0));
+    let before = 0;
+    for (let s = 0; s <= step; s++) {
+      const op = events[s];
+      if (op.type === 'update') {
+        before = C[op.i][op.j];
+        C[op.i][op.j] += op.a * B[op.k][op.j];
+      }
+    }
+    for (const [name, data] of [['a',A],['b',B],['c',C]]) root.querySelector(`[data-matrix="${name}"]`).innerHTML = matrix(name,data,e);
+    root.querySelector('[data-vars]').innerHTML = ['i','p','k','a','j'].map(key => `<span><code>${key}</code> = ${e[key] ?? '—'}</span>`).join('');
+    let storage = '<thead><tr><th>数组下标</th>' + values.map((_,p) => `<th>${p}</th>`).join('') + '</tr></thead><tbody>';
+    for (const [label, arr] of [['values',values],['col_idx',colIdx],['row_ptr',rowPtr]]) {
+      storage += `<tr><th scope="row"><code>${label}</code></th>`;
+      for (let p = 0; p < values.length; p++) {
+        const active = label === 'row_ptr' ? e.i !== undefined && (p === e.i || p === e.i+1) : p === e.p;
+        const inRange = label !== 'row_ptr' && e.i !== undefined && p >= rowPtr[e.i] && p < rowPtr[e.i+1];
+        storage += `<td class="${active ? 'csr-active' : inRange ? 'csr-range' : ''}">${arr[p] ?? '—'}</td>`;
+      }
+      storage += '</tr>';
+    }
+    root.querySelector('[data-storage]').innerHTML = storage + '</tbody>';
+    let detail;
+    if (e.type === 'init') detail = '开始：M = 3，N = 2；C 的所有元素初始化为 0。';
+    if (e.type === 'row') detail = `i = ${e.i}：p 从 row_ptr[${e.i}] = ${rowPtr[e.i]} 开始，到 ${rowPtr[e.i+1]} 前结束，即 [${rowPtr[e.i]}, ${rowPtr[e.i+1]})。`;
+    if (e.type === 'load') detail = `p = ${e.p}：读取 k = col_idx[${e.p}] = ${e.k}，a = values[${e.p}] = ${e.a}；选中 A[${e.i},${e.k}] 和 B 的第 ${e.k} 行。`;
+    if (e.type === 'update') detail = `C[${e.i},${e.j}]：${before} + ${e.a} × ${B[e.k][e.j]} = ${C[e.i][e.j]}；一维下标 C[${e.i}×${N}+${e.j}] = C[${e.i*N+e.j}]，B[${e.k}×${N}+${e.j}] = B[${e.k*N+e.j}]。`;
+    if (e.type === 'done') detail = '完成：5 个非零元素各遍历 B 的 2 列，共执行 10 次乘加。';
+    root.querySelector('[data-detail]').textContent = detail;
+    root.querySelector('[data-status]').textContent = `${step} / ${events.length-1} 步`;
+    root.querySelectorAll('[data-line]').forEach(line => line.classList.toggle('csr-current',line.dataset.line === e.type));
+    prev.disabled = step === 0;
+    next.disabled = step === events.length-1;
+    play.textContent = timer ? '暂停' : step === events.length-1 ? '重新播放' : '自动播放';
+  }
+  function stop() { if (timer) clearInterval(timer); timer = null; }
+  prev.addEventListener('click', () => { stop(); step = Math.max(0,step-1); render(); save(); });
+  next.addEventListener('click', () => { stop(); step = Math.min(events.length-1,step+1); render(); save(); });
+  play.addEventListener('click', () => {
+    if (timer) { stop(); render(); return; }
+    if (step === events.length-1) step = 0;
+    timer = setInterval(() => {
+      step++;
+      if (step === events.length-1) stop();
+      render(); save();
+    },1400);
+    render(); save();
+  });
+  window.addEventListener('openai:set_globals', event => {
+    const globals = event.detail?.globals;
+    if (!globals || !Object.prototype.hasOwnProperty.call(globals,'widgetState')) return;
+    const state = globals.widgetState;
+    // The host echoes local saves, sometimes synchronously. Do not stop the timer
+    // or restore an older frame when receiving one of our own saves.
+    if (state?.privateContent?.instanceId === instanceId) return;
+    const restoredStep = validStep(state);
+    if (restoredStep === step) return;
+    stop(); step = restoredStep; render();
+  });
+  render();
+})();
+</script>

@@ -1,0 +1,197 @@
+<div id="lab1-parallel-view">
+  <div class="viz-controls">
+    <label class="form-label" for="lab1-strategy">分工方式
+      <select class="form-select" id="lab1-strategy">
+        <option value="rows">Rows：静态按行</option>
+        <option value="dynamic">Dynamic：动态领取行</option>
+        <option value="balanced">NNZ blocks：按非零数分块</option>
+        <option value="tiled">Tiled：行块 × 列块</option>
+      </select>
+    </label>
+    <button type="button" class="btn" data-action="prev">上一步</button>
+    <button type="button" class="btn btn-primary" data-action="next">下一步</button>
+    <button type="button" class="btn" data-action="play">播放</button>
+  </div>
+  <div class="lp-caption text-small" data-config></div>
+  <h3>C 的写入归属 · 8 行 × 8 列</h3>
+  <table class="lp-matrix tabular-nums" aria-label="输出矩阵 C：每个单元格显示唯一负责写入的线程；nnz 是 A 对应行的非零数" data-matrix></table>
+  <div class="viz-row text-small lp-legend">
+    <span><i class="lp-swatch" style="--thread-color:var(--viz-series-1)"></i>T0</span>
+    <span><i class="lp-swatch" style="--thread-color:var(--viz-series-2)"></i>T1</span>
+    <span><i class="lp-swatch" style="--thread-color:var(--viz-series-3)"></i>T2</span>
+    <span><i class="lp-swatch" style="--thread-color:var(--viz-series-4)"></i>T3</span>
+    <span>底线：正在算</span><span>✓：任务完成</span>
+  </div>
+  <h3>4 个线程同时前进</h3>
+  <div class="lp-timeline" data-timeline></div>
+  <div class="text-small text-muted">横轴：理想等速进度（每单位完成 1 次乘加）；忽略调度与访存开销，非实测时间。</div>
+  <div class="lp-workers text-small tabular-nums" data-workers></div>
+  <div class="lp-detail" aria-live="polite" data-detail></div>
+  <pre class="lp-code"><code data-code></code></pre>
+</div>
+<style>
+  #lab1-parallel-view { color:var(--foreground); }
+  #lab1-parallel-view h3 { font-weight:500; margin:16px 0 8px; }
+  #lab1-parallel-view .lp-caption { margin-top:10px; overflow-wrap:anywhere; }
+  #lab1-parallel-view .lp-matrix { width:100%; table-layout:fixed; border-collapse:separate; border-spacing:3px; }
+  #lab1-parallel-view .lp-matrix th { font-weight:400; color:var(--muted-foreground); text-align:center; }
+  #lab1-parallel-view .lp-matrix th:first-child { width:20px; }
+  #lab1-parallel-view .lp-matrix th:nth-child(2) { width:28px; }
+  #lab1-parallel-view .lp-matrix td { padding:7px 0; text-align:center; color:var(--foreground); background:color-mix(in srgb,var(--thread-color,var(--muted)) 12%,var(--background)); }
+  #lab1-parallel-view .lp-matrix td.running { background:color-mix(in srgb,var(--thread-color) 30%,var(--background)); box-shadow:inset 0 -3px var(--thread-color); }
+  #lab1-parallel-view .lp-matrix td.complete { background:color-mix(in srgb,var(--thread-color) 22%,var(--background)); }
+  #lab1-parallel-view .lp-legend { justify-content:flex-start; margin:8px 0; }
+  #lab1-parallel-view .lp-legend span { display:inline-flex; align-items:center; gap:5px; }
+  #lab1-parallel-view .lp-swatch { display:inline-block; width:10px; height:10px; background:var(--thread-color); }
+  #lab1-parallel-view .lp-timeline svg { display:block; width:100%; }
+  #lab1-parallel-view .lp-timeline text { fill:var(--foreground); font-size:12px; }
+  #lab1-parallel-view .lp-workers { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 16px; margin:12px 0; }
+  #lab1-parallel-view .lp-detail { margin:12px 0; overflow-wrap:anywhere; }
+  #lab1-parallel-view .lp-code { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+  #lab1-parallel-view .lp-code mark { display:block; background:color-mix(in srgb,var(--viz-series-1) 16%,var(--background)); color:var(--foreground); }
+  @media(max-width:420px) {
+    #lab1-parallel-view .lp-workers { grid-template-columns:1fr; }
+    #lab1-parallel-view .lp-matrix { border-spacing:2px; }
+    #lab1-parallel-view .lp-done { display:block; }
+  }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('lab1-parallel-view');
+  const nnz = [8,1,1,1,1,1,1,1], N = 8, P = 4, target = 8, tile = 3;
+  const colors = ['var(--viz-series-1)','var(--viz-series-2)','var(--viz-series-3)','var(--viz-series-4)'];
+  // This is the same greedy partition as Lab1/src/partition.cpp: close after
+  // accumulated nnz reaches the target, keeping the last row intact.
+  const blocks = []; let begin = 0, count = 0;
+  for (let i = 0; i < nnz.length; i++) {
+    count += nnz[i];
+    if (count >= target) { blocks.push({begin,end:i+1,nnz:count}); begin=i+1; count=0; }
+  }
+  if (begin < nnz.length) blocks.push({begin,end:nnz.length,nnz:count});
+  const names = {rows:'Rows',dynamic:'Dynamic',balanced:'NNZ blocks',tiled:'Tiled'};
+  function task(r0,r1,c0,c1) {
+    return {r0,r1,c0,c1,work:nnz.slice(r0,r1).reduce((a,b)=>a+b,0)*(c1-c0)};
+  }
+  function make(mode) {
+    let tasks;
+    if (mode==='rows' || mode==='dynamic') tasks=nnz.map((_,i)=>task(i,i+1,0,N));
+    else if (mode==='balanced') tasks=blocks.map(b=>task(b.begin,b.end,0,N));
+    else tasks=blocks.flatMap(b=>Array.from({length:Math.ceil(N/tile)},(_,panel)=>task(b.begin,b.end,panel*tile,Math.min((panel+1)*tile,N))));
+    tasks.forEach((t,id)=>t.id=id);
+    const finish=Array(P).fill(0);
+    const assign=(t,tid)=>{t.tid=tid;t.start=finish[tid];finish[tid]+=t.work;t.end=finish[tid];};
+    if (mode==='dynamic') {
+      // One valid equal-speed dynamic,1 schedule; ties pick the lowest thread ID.
+      tasks.forEach(t=>{const earliest=Math.min(...finish);assign(t,finish.indexOf(earliest));});
+    } else {
+      // A typical contiguous static split with no explicit chunk. OpenMP does
+      // not prescribe which threads receive the remainder in every runtime.
+      let pos=0;
+      for(let tid=0;tid<P;tid++) {
+        const length=Math.floor(tasks.length/P)+(tid<tasks.length%P?1:0);
+        for(let n=0;n<length;n++) assign(tasks[pos++],tid);
+      }
+    }
+    return {tasks,finish,total:Math.max(...finish)};
+  }
+  const models=Object.fromEntries(Object.keys(names).map(mode=>[mode,make(mode)]));
+  const maxWork=Math.max(...Object.values(models).map(m=>m.total));
+  const select=root.querySelector('#lab1-strategy');
+  const prev=root.querySelector('[data-action="prev"]'), next=root.querySelector('[data-action="next"]'), play=root.querySelector('[data-action="play"]');
+  const instanceId=Math.random().toString(36).slice(2);
+  let mode='rows', time=0, timer=null;
+  function restore(state) {
+    const s=state?.privateContent;
+    if(s?.version!==1 || !models[s.mode]) return;
+    mode=s.mode;time=Number.isFinite(s.time)?Math.max(0,Math.min(models[mode].total,s.time)):0;
+  }
+  restore(window.openai?.widgetState);
+  function save() {
+    try {
+      const promise=window.openai?.setWidgetState?.({modelContent:{topic:'Lab1 任务划分',strategy:mode,progress:time,simulated:true},privateContent:{version:1,mode,time,instanceId}});
+      Promise.resolve(promise).catch(()=>{});
+    } catch (_) {}
+  }
+  function stateOf(t) { return time>=t.end?'complete':time>=t.start?'running':'pending'; }
+  function label(t) { return `行 [${t.r0},${t.r1}) × 列 [${t.c0},${t.c1})`; }
+  function drawTimeline(model) {
+    const container=root.querySelector('[data-timeline]');
+    const width=Math.max(240,container.clientWidth), left=40, right=16, y0=30, dy=36, height=206;
+    const x=v=>left+v/maxWork*(width-left-right);
+    let svg=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="线程任务时间线，颜色对应 T0 到 T3，竖线表示当前模拟进度"><title>线程并行工作与屏障等待</title>`;
+    for(let tid=0;tid<P;tid++) {
+      const y=y0+tid*dy;
+      svg+=`<text x="0" y="${y+17}">T${tid}</text>`;
+      const end=model.finish[tid];
+      if(end<model.total) {
+        svg+=`<rect x="${x(end)}" y="${y}" width="${x(model.total)-x(end)}" height="26" fill="var(--muted)"/>`;
+        if(x(model.total)-x(end)>44) svg+=`<text x="${(x(end)+x(model.total))/2}" y="${y+17}" text-anchor="middle">等待</text>`;
+      }
+      for(const t of model.tasks.filter(t=>t.tid===tid)) {
+        const a=x(t.start), b=x(t.end), consumed=Math.max(0,Math.min(t.work,time-t.start));
+        svg+=`<g data-tooltip="任务 ${t.id}：${label(t)}，${t.work} 次乘加，T${tid}" aria-label="任务 ${t.id}，${label(t)}，${t.work} 次乘加">`;
+        svg+=`<rect x="${a+1}" y="${y}" width="${Math.max(0,b-a-2)}" height="26" fill="${colors[tid]}" opacity="0.15"/>`;
+        if(consumed>0) svg+=`<rect x="${a+1}" y="${y}" width="${Math.max(0,x(t.start+consumed)-a-2)}" height="26" fill="${colors[tid]}" opacity="0.5"/>`;
+        if(b-a>35) svg+=`<text x="${(a+b)/2}" y="${y+17}" text-anchor="middle">${t.r1-t.r0===1?'R'+t.r0:'R'+t.r0+'–'+(t.r1-1)}</text>`;
+        svg+='</g>';
+      }
+    }
+    svg+=`<line x1="${left}" y1="178" x2="${width-right}" y2="178" stroke="var(--border)"/>`;
+    for(const v of [0,maxWork/3,maxWork*2/3,maxWork]) {
+      svg+=`<text x="${x(v)}" y="198" text-anchor="${v===0?'start':v===maxWork?'end':'middle'}">${Math.round(v)}</text>`;
+    }
+    svg+=`<line x1="${x(time)}" y1="24" x2="${x(time)}" y2="174" stroke="var(--foreground)" stroke-width="1.5"/>`;
+    container.innerHTML=svg+'</svg>';
+  }
+  function render() {
+    select.value=mode;
+    const model=models[mode];
+    const config=mode==='dynamic'?'dynamic,1': 'static，无 chunk';
+    root.querySelector('[data-config]').textContent=`教学例子：4 线程；A 每行 nnz = [${nnz.join(', ')}]；${config}${mode==='balanced'||mode==='tiled'?'; block-nnz = 8':''}${mode==='tiled'?'; tile = 3，6 个矩形任务':''}。`;
+    let matrix='<thead><tr><th>i</th><th>nnz</th>'+Array.from({length:N},(_,j)=>`<th>${j}</th>`).join('')+'</tr></thead><tbody>';
+    for(let i=0;i<nnz.length;i++) {
+      matrix+=`<tr><th scope="row">${i}</th><th>${nnz[i]}</th>`;
+      for(let j=0;j<N;j++) {
+        const t=model.tasks.find(t=>i>=t.r0&&i<t.r1&&j>=t.c0&&j<t.c1);
+        const state=stateOf(t), unclaimed=mode==='dynamic'&&state==='pending';
+        const title=`C[${i},${j}]，${unclaimed?'尚未领取':`T${t.tid}`}，任务 ${t.id}：${label(t)}，${state==='complete'?'已完成':state==='running'?'计算中':'未开始'}`;
+        matrix+=`<td class="${state}" style="--thread-color:${unclaimed?'var(--muted)':colors[t.tid]}" data-task="${t.id}" data-tooltip="${title}" aria-label="${title}">${unclaimed?'—':'T'+t.tid}${state==='complete'?'<span class="lp-done">✓</span>':''}</td>`;
+      }
+      matrix+='</tr>';
+    }
+    root.querySelector('[data-matrix]').innerHTML=matrix+'</tbody>';
+    drawTimeline(model);
+    root.querySelector('[data-workers]').innerHTML=Array.from({length:P},(_,tid)=>{
+      const assigned=model.tasks.filter(t=>t.tid===tid), active=assigned.find(t=>stateOf(t)==='running');
+      const work=assigned.reduce((sum,t)=>sum+Math.max(0,Math.min(t.work,time-t.start)),0);
+      const text=active?`任务 ${active.id} · ${label(active)}`:time<model.total?`屏障等待 ${Math.max(0,time-model.finish[tid])} 单位`:'已结束';
+      return `<div>T${tid}：${work} / ${model.finish[tid]} 次乘加<br>${text}</div>`;
+    }).join('');
+    const done=model.tasks.filter(t=>stateOf(t)==='complete').length;
+    root.querySelector('[data-detail]').textContent=`进度 ${time} / ${model.total}；完成 ${done} / ${model.tasks.length} 个任务。${mode==='tiled'?'同一行的不同列可以属于不同线程。':mode==='balanced'?'整行不拆开：第 0 行单独成块，剩余 7 行形成一个块。':mode==='dynamic'?'动态领取次序是一个等速示意；正在算第 0 行的线程不会把这一行分给别人。':'行数相等，工作量仍可能不等：第 0 行有 8 个非零元素。'}`;
+    const snippets={
+      rows:'<mark>#pragma omp for schedule(runtime)</mark>for (size_t i = 0; i &lt; M; ++i)\n  accumulate(i, i + 1, 0, N);',
+      dynamic:'<mark>#pragma omp for schedule(runtime)</mark>for (size_t i = 0; i &lt; M; ++i)\n  accumulate(i, i + 1, 0, N);',
+      balanced:'<mark>#pragma omp for schedule(runtime)</mark>for (size_t task = 0; task &lt; blocks.size(); ++task)\n  accumulate(blocks[task].begin, blocks[task].end, 0, N);',
+      tiled:'<mark>#pragma omp for collapse(2) schedule(runtime)</mark>for (size_t block = 0; block &lt; blocks.size(); ++block)\n  for (size_t panel = 0; panel &lt; column_tiles; ++panel)\n    register_block(行起点, 行终点, 列起点, 列终点);'
+    };
+    root.querySelector('[data-code]').innerHTML=snippets[mode];
+    prev.disabled=time===0;next.disabled=time===model.total;
+    play.textContent=timer?'暂停':time===model.total?'重新播放':'播放';
+  }
+  function stop() { if(timer) clearInterval(timer);timer=null; }
+  function advance() {time=Math.min(models[mode].total,time+8);if(time===models[mode].total)stop();render();save();}
+  select.addEventListener('change',()=>{stop();mode=select.value;time=0;render();save();});
+  next.addEventListener('click',()=>{stop();advance();});
+  prev.addEventListener('click',()=>{stop();time=Math.max(0,time-8);render();save();});
+  play.addEventListener('click',()=>{if(timer){stop();render();return;}if(time===models[mode].total)time=0;timer=setInterval(advance,900);render();save();});
+  window.addEventListener('openai:set_globals',event=>{
+    const state=event.detail?.globals?.widgetState;
+    if(!state || state.privateContent?.instanceId===instanceId)return;
+    const oldMode=mode,oldTime=time;restore(state);
+    if(mode!==oldMode||time!==oldTime){stop();render();}
+  });
+  new ResizeObserver(()=>drawTimeline(models[mode])).observe(root.querySelector('[data-timeline]'));
+  render();
+})();
+</script>
